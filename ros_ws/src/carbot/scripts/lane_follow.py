@@ -97,7 +97,7 @@ LANE_ACTIVE_PHASES = {
 
 # Ultrasonic safety stop - berhenti bila terlalu dekat objek/palang
 # (data dari Arduino via /carbot/status, format: "... US:14.5 ...")
-US_STOP_CM  = 15.0   # cm - berhenti bila US < nilai ini
+US_STOP_CM  = 18.0   # cm - berhenti bila US < nilai ini (buffer inersia sebelum Arduino HARD stop @ 8cm)
 current_us  = 999.0  # cm - nilai lalai: jauh (tiada halangan)
 
 pid_error_prev = 0.0

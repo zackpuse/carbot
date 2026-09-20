@@ -11,6 +11,8 @@ from collections import deque
 from std_msgs.msg import String, Bool
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
+from dynamic_reconfigure.server import Server
+from carbot.cfg import TunnelNavConfig
 
 # ==================== CONFIG ====================
 CARBOT_RUNNING = False
@@ -115,6 +117,15 @@ MIN_SPEED    = 0.12    # dinaikkan dari 0.09 sepadan dengan TUNNEL_SPEED - TUNE 
 # Filter
 FILTER_SIZE = 1   # diturunkan: hapus sensor lag (~300ms -> ~100ms)
 LP_ALPHA    = 0.70  # diturunkan: steer filter lebih responsive
+
+def reconfigure_callback(config, level):
+    global KP, KI, KD, KP_WALL
+    KP = config['kp']
+    KI = config['ki']
+    KD = config['kd']
+    KP_WALL = config['kp_wall']
+    rospy.loginfo("[TUNNEL] Reconfigure: KP=%.2f KI=%.3f KD=%.2f KP_WALL=%.2f" % (KP, KI, KD, KP_WALL))
+    return config
 
 # ==================== FILTER ====================
 filter_left  = deque(maxlen=FILTER_SIZE)
@@ -435,6 +446,11 @@ def stop_carbot():
 def main():
     global pub_cmd, pub_debug, pub_active
     rospy.init_node('tunnel_nav')
+
+    try:
+        Server(TunnelNavConfig, reconfigure_callback)
+    except Exception as e:
+        rospy.logwarn("[TUNNEL] Dynamic reconfigure fail: %s" % str(e))
 
     pub_cmd    = rospy.Publisher('/cmd_vel',             Twist,  queue_size=1)
     pub_debug  = rospy.Publisher('/tunnel_nav/debug',    String, queue_size=1)

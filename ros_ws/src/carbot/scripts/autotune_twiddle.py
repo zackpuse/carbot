@@ -88,7 +88,12 @@ class TwiddleTuner(object):
         self.cmd_event = threading.Event()
         self.abort_requested = False
 
-        self.reconf_client = Client("lane_follow", timeout=10)
+        try:
+            self.reconf_client = Client("lane_follow", timeout=10)
+        except rospy.ROSException:
+            rospy.logerr("[TWIDDLE] GAGAL: Tiada service /lane_follow/set_parameters.")
+            rospy.logerr("[TWIDDLE] Pastikan node lane_follow berjalan dan dynamic_reconfigure tidak ralat.")
+            os._exit(1)
         rospy.Subscriber("/lane_follow/mask_image", Image, self._mask_cb, queue_size=1)
         rospy.Subscriber("/autotune/cmd", String, self._cmd_cb, queue_size=1)
         self.pub_status = rospy.Publisher("/autotune/status", String, queue_size=1)
@@ -105,6 +110,7 @@ class TwiddleTuner(object):
             self.abort_requested = True
             if self.trial_active:
                 self.trial_aborted = True
+            self.cmd_event.set()
 
     def _status_loop(self):
         rate = rospy.Rate(STATUS_PUBLISH_HZ)
@@ -190,6 +196,9 @@ class TwiddleTuner(object):
             "tekan Mula/Teruskan untuk aktifkan gain ini & mula rekod." % (
                 params["kp"], params["ki"], params["kd"]))
 
+        if self.abort_requested:
+            return NO_LINE_PENALTY
+
         # Operator dah confirm sedia - baru sekarang gain diaktifkan.
         self._push_params(params)
         time.sleep(0.3)  # bagi dynamic_reconfigure settle
@@ -229,7 +238,7 @@ class TwiddleTuner(object):
         self.best_params = dict(self.params)
         self._save_best()
 
-        while sum(self.dp.values()) > TWIDDLE_TOL and not rospy.is_shutdown():
+        while sum(self.dp.values()) > TWIDDLE_TOL and not rospy.is_shutdown() and not self.abort_requested:
             self.iteration += 1
             print("\n===== Iterasi Twiddle #%d (jumlah dp=%.5f) =====" %
                   (self.iteration, sum(self.dp.values())))
@@ -259,7 +268,10 @@ class TwiddleTuner(object):
                 else:
                     self.dp[name] *= 0.9
 
-        self.status_msg = "SELESAI. Param terbaik: %s (cost=%.2f)" % (self.best_params, self.best_cost)
+        if self.abort_requested:
+            self.status_msg = "DIBATALKAN OLEH OPERATOR. Param terbaik setakat ini: %s (cost=%.2f)" % (self.best_params, self.best_cost)
+        else:
+            self.status_msg = "SELESAI. Param terbaik: %s (cost=%.2f)" % (self.best_params, self.best_cost)
         print("\n[TWIDDLE] " + self.status_msg)
         self._push_params(self.best_params)
         self.log_fh.close()

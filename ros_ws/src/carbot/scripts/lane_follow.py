@@ -95,6 +95,11 @@ LANE_ACTIVE_PHASES = {
     "LANE_TO_PARALLEL", "LANE_TO_PERP",
 }
 
+# Ultrasonic safety stop - berhenti bila terlalu dekat objek/palang
+# (data dari Arduino via /carbot/status, format: "... US:14.5 ...")
+US_STOP_CM  = 15.0   # cm - berhenti bila US < nilai ini
+current_us  = 999.0  # cm - nilai lalai: jauh (tiada halangan)
+
 pid_error_prev = 0.0
 pid_integral   = 0.0
 pid_last_time  = None
@@ -326,7 +331,7 @@ def stop_carbot():
 
 # ==================== CALLBACKS ====================
 def status_callback(msg):
-    global CARBOT_RUNNING
+    global CARBOT_RUNNING, current_us
     data = msg.data
 
     if 'ST:R' in data:
@@ -334,6 +339,14 @@ def status_callback(msg):
     elif 'ST:S' in data or 'ST:E' in data:
         CARBOT_RUNNING = False
         stop_carbot()
+
+    # Parse bacaan ultrasonik dari Arduino (format: "US:14.5")
+    for part in data.split():
+        if part.startswith('US:'):
+            try:
+                current_us = float(part.split(':', 1)[1])
+            except ValueError:
+                pass
 
 def tunnel_active_callback(msg):
     """Subscribe /tunnel_nav/active — stop lane_follow bila tunnel_nav ambil alih."""
@@ -363,6 +376,13 @@ def image_callback(msg):
     # Diam bila berada di fasa WAIT_*, PARK_*, atau MISSION_DONE
     # (elak berebut /cmd_vel dengan parking_nav atau melanggar palang)
     if CURRENT_MISSION_PHASE and CURRENT_MISSION_PHASE not in LANE_ACTIVE_PHASES:
+        return
+    # Ultrasonic safety stop - berhenti dan tahan bila terlalu dekat halangan
+    # (terutama BoomGate yang masih tertutup semasa LANE_TO_GATE2)
+    if current_us < US_STOP_CM:
+        rospy.logwarn_throttle(2.0, "[LANE] US STOP: %.1fcm < %.0fcm - menunggu laluan terbuka" %
+                               (current_us, US_STOP_CM))
+        stop_carbot()
         return
     try:
         frame = image_msg_to_numpy(msg)
@@ -395,6 +415,7 @@ def main():
     rospy.loginfo("[LANE] Config file: %s" % CONFIG_FILE)
     rospy.loginfo("[LANE] Visual debug: /lane_follow/mask_image dan /lane_follow/overlay_image")
     rospy.loginfo("[LANE] Skip aktif bila /tunnel_nav/active=True (tunnel_nav ambil alih)")
+    rospy.loginfo("[LANE] Ultrasonic stop: berhenti bila US < %.0fcm" % US_STOP_CM)
     rospy.spin()
 
 if __name__ == '__main__':

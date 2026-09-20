@@ -91,6 +91,7 @@ pub_ctrl   = None
 pub_result = None
 
 park_state = 'IDLE'
+next_park_state = None
 state_dist = 0.0
 
 # ==================== PARSE STATUS ====================
@@ -143,14 +144,20 @@ def dist_since_state():
 
 # ==================== PARALLEL PARKING ====================
 def parallel_parking_step():
-    global park_state, state_dist
+    global park_state, state_dist, next_park_state
 
-    if park_state == 'POSITION':
+    if park_state == 'WAIT_RESET':
+        if current_dist < 5.0:
+            rospy.loginfo("[PARK] Reset disahkan - masuk %s" % next_park_state)
+            state_dist = current_dist
+            park_state = next_park_state
+
+    elif park_state == 'POSITION':
         if dist_since_state() >= 20.0:
             rospy.loginfo("[PARK] Position done - reverse steer")
-            park_state = 'REVERSE_STEER'
             reset_distance()
-            state_dist = current_dist
+            next_park_state = 'REVERSE_STEER'
+            park_state = 'WAIT_RESET'
             stop()
             rospy.sleep(0.5)
         else:
@@ -159,9 +166,9 @@ def parallel_parking_step():
     elif park_state == 'REVERSE_STEER':
         if dist_since_state() >= PARALLEL_REVERSE_DIST * 0.6:
             rospy.loginfo("[PARK] Reverse steer done - reverse straight")
-            park_state = 'REVERSE_STRAIGHT'
             reset_distance()
-            state_dist = current_dist
+            next_park_state = 'REVERSE_STRAIGHT'
+            park_state = 'WAIT_RESET'
             stop()
             rospy.sleep(0.3)
         else:
@@ -170,9 +177,9 @@ def parallel_parking_step():
     elif park_state == 'REVERSE_STRAIGHT':
         if dist_since_state() >= PARALLEL_REVERSE_DIST * 0.4:
             rospy.loginfo("[PARK] Reverse straight done - adjust")
-            park_state = 'ADJUST'
             reset_distance()
-            state_dist = current_dist
+            next_park_state = 'ADJUST'
+            park_state = 'WAIT_RESET'
             stop()
             rospy.sleep(0.3)
         else:
@@ -192,14 +199,20 @@ def parallel_parking_step():
 
 # ==================== PERPENDICULAR PARKING ====================
 def perpendicular_parking_step():
-    global park_state, state_dist
+    global park_state, state_dist, next_park_state
 
-    if park_state == 'POSITION':
+    if park_state == 'WAIT_RESET':
+        if current_dist < 5.0:
+            rospy.loginfo("[PARK] Reset disahkan - masuk %s" % next_park_state)
+            state_dist = current_dist
+            park_state = next_park_state
+
+    elif park_state == 'POSITION':
         if dist_since_state() >= PERP_FORWARD_DIST:
             rospy.loginfo("[PARK] Aligned - reversing")
-            park_state = 'REVERSE'
             reset_distance()
-            state_dist = current_dist
+            next_park_state = 'REVERSE'
+            park_state = 'WAIT_RESET'
             stop()
             rospy.sleep(0.5)
         else:
@@ -245,24 +258,24 @@ def status_callback(msg):
         perpendicular_parking_step()
 
 def nav_cmd_callback(msg):
-    global parking_active, parking_type, park_state, state_dist
+    global parking_active, parking_type, park_state, state_dist, next_park_state
 
     cmd = msg.data.strip()
 
     if cmd == 'PARK_PARALLEL':
         parking_active = True
         parking_type   = 'parallel'
-        park_state     = 'POSITION'
         reset_distance()
-        state_dist     = current_dist
+        next_park_state = 'POSITION'
+        park_state = 'WAIT_RESET'
         rospy.loginfo("[PARK] START parallel parking - mengambil kawalan /cmd_vel")
 
     elif cmd == 'PARK_PERPENDICULAR':
         parking_active = True
         parking_type   = 'perpendicular'
-        park_state     = 'POSITION'
         reset_distance()
-        state_dist     = current_dist
+        next_park_state = 'POSITION'
+        park_state = 'WAIT_RESET'
         rospy.loginfo("[PARK] START perpendicular parking - mengambil kawalan /cmd_vel")
 
     elif cmd == 'PARK_CANCEL':

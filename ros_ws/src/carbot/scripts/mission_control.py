@@ -120,7 +120,8 @@ def check_watchdog():
         reset_detection_history()
         # Reset masa supaya amaran tidak berulang setiap frame - beri
         # tempoh baru sebelum amaran seterusnya
-        globals()['phase_enter_time'] = rospy.Time.now().to_sec()
+        global phase_enter_time
+        phase_enter_time = rospy.Time.now().to_sec()
 
 # ==================== CALLBACKS ====================
 def status_callback(msg):
@@ -139,12 +140,14 @@ def tunnel_active_callback(msg):
     TUNNEL_ACTIVE = msg.data
 
     if TUNNEL_ACTIVE and not was_active:
-        if current_phase == PHASE_LANE_TO_TUNNEL:
+        if current_phase != PHASE_TUNNEL:
+            rospy.logwarn("[MISSION] LiDAR mendeteksi terowong! Memaksa masuk fasa TUNNEL.")
             set_phase(PHASE_TUNNEL)
             reset_detection_history()
 
     elif not TUNNEL_ACTIVE and was_active:
         if current_phase == PHASE_TUNNEL:
+            rospy.logwarn("[MISSION] LiDAR mendeteksi keluar terowong! Memaksa masuk fasa LANE_TO_GATE2.")
             set_phase(PHASE_LANE_TO_GATE2)
             reset_detection_history()
 

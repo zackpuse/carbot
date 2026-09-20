@@ -81,8 +81,19 @@ def reconfigure_callback(config, level):
     return config
 
 # ==================== STATE ====================
-CARBOT_RUNNING = False
-TUNNEL_ACTIVE  = False
+CARBOT_RUNNING        = False
+TUNNEL_ACTIVE         = False
+CURRENT_MISSION_PHASE = ""  # Dari /mission/phase - lane_follow diam bila bukan fasa memandu
+
+# Fasa-fasa di mana lane_follow DIBENARKAN publish /cmd_vel.
+# Di luar senarai ini (WAIT_*, PARK_*, MISSION_DONE), lane_follow DIAM.
+LANE_ACTIVE_PHASES = {
+    "LANE_TO_CHANGE", "LANE_CHANGED", "LANE_TO_ROUND",
+    "ROUNDABOUT",     "LANE_TO_TUNNEL", "LANE_TO_GATE2",
+    "HILL",           "LANE_TO_LIGHT",  "LANE_TO_CHANGE2",
+    "LANE_TO_ROUND2", "ROUNDABOUT2",
+    "LANE_TO_PARALLEL", "LANE_TO_PERP",
+}
 
 pid_error_prev = 0.0
 pid_integral   = 0.0
@@ -334,8 +345,24 @@ def tunnel_active_callback(msg):
     else:
         rospy.loginfo("[LANE] Tunnel selesai — lane_follow ambil semula cmd_vel")
 
+def mission_phase_callback(msg):
+    """Subscribe /mission/phase — lane_follow hanya aktif pada fasa memandu."""
+    global CURRENT_MISSION_PHASE
+    prev = CURRENT_MISSION_PHASE
+    CURRENT_MISSION_PHASE = msg.data
+    if prev != CURRENT_MISSION_PHASE:
+        in_active = CURRENT_MISSION_PHASE in LANE_ACTIVE_PHASES
+        rospy.loginfo("[LANE] Fasa: %s -> %s | lane_follow %s" % (
+            prev, CURRENT_MISSION_PHASE, "AKTIF" if in_active else "DIAM"))
+        if not in_active:
+            reset_pid()  # bersihkan PID supaya tidak ada steer terkumpul bila mula balik
+
 def image_callback(msg):
     if not CARBOT_RUNNING or TUNNEL_ACTIVE:
+        return
+    # Diam bila berada di fasa WAIT_*, PARK_*, atau MISSION_DONE
+    # (elak berebut /cmd_vel dengan parking_nav atau melanggar palang)
+    if CURRENT_MISSION_PHASE and CURRENT_MISSION_PHASE not in LANE_ACTIVE_PHASES:
         return
     try:
         frame = image_msg_to_numpy(msg)
@@ -361,6 +388,7 @@ def main():
 
     rospy.Subscriber('/carbot/status',          String, status_callback)
     rospy.Subscriber('/tunnel_nav/active',       Bool,   tunnel_active_callback)
+    rospy.Subscriber('/mission/phase',           String, mission_phase_callback)
     rospy.Subscriber('/camera/front/image_raw', Image,  image_callback, queue_size=1)
 
     rospy.loginfo("[LANE] Lane Following ready")

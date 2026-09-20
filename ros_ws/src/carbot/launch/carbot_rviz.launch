@@ -1,0 +1,53 @@
+<launch>
+
+  <param name="robot_description"
+         textfile="/ssd/ros_ws/src/carbot/urdf/carbot.urdf"/>
+
+  <node name="robot_state_publisher"
+        pkg="robot_state_publisher"
+        type="robot_state_publisher"
+        output="screen"/>
+
+  <node name="joint_state_publisher"
+        pkg="joint_state_publisher"
+        type="joint_state_publisher"
+        output="screen"/>
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="map_to_odom"
+        args="0 0 0 0 0 0 map odom 100"/>
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="odom_to_base"
+        args="0 0 0 0 0 0 odom base_footprint 100"/>
+
+  <node name="serial_node"
+        pkg="rosserial_python"
+        type="serial_node.py"
+        output="screen">
+    <param name="port" value="/dev/ttyMEGA"/>
+    <param name="baud" value="115200"/>
+  </node>
+
+  <node name="rplidarNode"
+        pkg="rplidar_ros"
+        type="rplidarNode"
+        output="screen">
+    <param name="serial_port"      value="/dev/ttyLIDAR"/>
+    <param name="serial_baudrate"  value="115200"/>
+    <param name="frame_id"         value="laser"/>
+    <param name="angle_compensate" type="bool" value="true"/>
+  </node>
+
+  <node name="lidar_controller"
+        pkg="carbot"
+        type="lidar_controller.py"
+        output="screen"/>
+
+  <node name="rviz"
+        pkg="rviz"
+        type="rviz"
+        args="-d /ssd/ros_ws/src/carbot/rviz/carbot.rviz"
+        output="screen"/>
+
+</launch>

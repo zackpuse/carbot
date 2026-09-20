@@ -1,0 +1,127 @@
+<launch>
+
+  <!-- URDF Robot Model -->
+  <param name="robot_description"
+         textfile="/ssd/ros_ws/src/carbot/urdf/carbot.urdf"/>
+
+  <!-- TF Publishers -->
+  <node name="robot_state_publisher"
+        pkg="robot_state_publisher"
+        type="robot_state_publisher"
+        output="screen"/>
+
+  <node name="joint_state_publisher"
+        pkg="joint_state_publisher"
+        type="joint_state_publisher"
+        output="screen"/>
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="map_to_odom"
+        args="0 0 0 0 0 0 map odom 100"/>
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="odom_to_base"
+        args="0 0 0 0 0 0 odom base_footprint 100"/>
+
+  <!-- Arduino Mega - rosserial -->
+  <node name="serial_node"
+        pkg="rosserial_python"
+        type="serial_node.py"
+        output="screen">
+    <param name="port" value="/dev/ttyMEGA"/>
+    <param name="baud" value="115200"/>
+  </node>
+
+  <!-- LiDAR RPLidar A1 -->
+  <node name="rplidarNode"
+        pkg="rplidar_ros"
+        type="rplidarNode"
+        output="screen">
+    <param name="serial_port"      value="/dev/ttyLIDAR"/>
+    <param name="serial_baudrate"  value="115200"/>
+    <param name="frame_id"         value="laser"/>
+    <param name="angle_compensate" type="bool" value="true"/>
+  </node>
+
+  <!-- LiDAR Filter - 90 darjah hadapan sahaja -->
+  <node name="lidar_filter"
+        pkg="carbot"
+        type="lidar_filter.py"
+        output="screen"/>
+
+  <!-- Parking navigation -->
+  <node name="parking_nav"
+        pkg="carbot"
+        type="parking_nav.py"
+        output="screen"/>
+ 
+
+  <!-- LiDAR Motor Controller - ikut START button -->
+  <node name="lidar_controller"
+        pkg="carbot"
+        type="lidar_controller.py"
+        output="screen"/>
+
+  <!-- Camera Node - CAM0 depan + CAM1 belakang -->
+  <!-- Start/stop ikut START button -->
+  <node name="camera_node"
+        pkg="carbot"
+        type="camera_node.py"
+        output="screen"
+        launch-prefix="bash -c 'source /ssd/envs/car_brain/bin/activate &amp;&amp; exec python $0 $@' --"/>
+
+  <!-- YOLOv5n Detector - CAM0 depan -->
+  <node name="yolo_detector"
+        pkg="carbot"
+        type="yolo_detector.py"
+        output="screen"
+        launch-prefix="bash -c 'source /ssd/envs/car_brain/bin/activate &amp;&amp; exec python $0 $@' --"/>
+  
+  <!-- Lane Following - CAM0 -->
+  <node name="lane_follow"
+        pkg="carbot"
+        type="lane_follow.py"
+        output="screen"
+        launch-prefix="bash -c 'source /ssd/envs/car_brain/bin/activate &amp;&amp; exec python $0 $@' --"/>
+
+  
+ <!-- Tunnel Navigation Dashboard - LiDAR auto detect -->
+<node name="tunnel_nav"
+        pkg="carbot"
+        type="tunnel_nav.py"
+        output="screen"/>
+
+
+  <!-- Mission Control Orchestrator -->
+  <node name="mission_control"
+        pkg="carbot"
+        type="mission_control.py"
+        output="screen"/>
+
+  <!-- RViz -->
+  <node name="rviz"
+        pkg="rviz"
+        type="rviz"
+        args="-d /ssd/ros_ws/src/carbot/rviz/carbot.rviz"
+        output="screen"/>
+
+  <!-- Shutdown Listener -->
+  <node name="shutdown_listener"
+        pkg="carbot"
+        type="shutdown_listener.py"
+        output="screen"/>
+
+  <!-- ROS Bridge WebSocket - untuk dashboard web (port 9090) -->
+  <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch">
+    <arg name="port" value="9090"/>
+  </include>
+
+  <!-- Web Video Server - MJPEG stream untuk dashboard (port 8081) -->
+  <node name="web_video_server"
+        pkg="web_video_server"
+        type="web_video_server"
+        output="screen">
+    <param name="port" value="8081"/>
+  </node>
+
+</launch>

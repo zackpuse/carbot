@@ -1,0 +1,329 @@
+#!/usr/bin/env python
+import rospy
+import math
+from collections import deque
+from std_msgs.msg import String, Bool
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
+from dynamic_reconfigure.server import Server
+from carbot.cfg import TunnelNavConfig
+
+cfg = {
+    'left_zone_min':  15,
+    'left_zone_max':  120,
+    'right_zone_min': -120,
+    'right_zone_max': -15,
+    'wall_max_range':  0.42,
+    'tunnel_max_width': 0.75,
+    'tunnel_min_width': 0.25,
+    'min_wall_dist':   0.20,
+    'front_stop_dist': 0.45,
+    'front_warn_dist': 0.65,
+    'kp': 1.4, 'ki': 0.01, 'kd': 0.8,
+    'kp_wall': 6.0,
+    'kp_front': 4.0,
+    'max_steer': 1.0,
+    'steer_deadzone': 0.02,
+    'steer_sign': -1.0,
+    'tunnel_speed': 0.12,
+    'min_speed': 0.05,
+    'lp_alpha': 1.0,
+    'lp_alpha_curve': 1.0,
+    'hysteresis_frames': 3,
+    'motor_enabled': True,
+}
+
+def reconfigure_callback(config, level):
+    global cfg
+    cfg.update(config)
+    rospy.loginfo("[DASHBOARD] Config: KP=%.2f SIGN=%.1f lp=%.2f lp_c=%.2f SPD=%.2f" %
+                  (cfg['kp'], cfg.get('steer_sign',1.0),
+                   cfg['lp_alpha'], cfg['lp_alpha_curve'], cfg['tunnel_speed']))
+    return config
+
+CARBOT_RUNNING = False
+TUNNEL_ACTIVE  = False
+FILTER_SIZE    = 5
+TREND_WINDOW   = 5
+
+filter_left   = deque(maxlen=FILTER_SIZE)
+filter_right  = deque(maxlen=FILTER_SIZE)
+filter_front  = deque(maxlen=FILTER_SIZE)
+left_history  = deque(maxlen=TREND_WINDOW)
+right_history = deque(maxlen=TREND_WINDOW)
+
+last_left  = 999.0
+last_right = 999.0
+last_front = 999.0
+
+pid_integral = 0.0
+steer_prev   = 0.0
+
+dual_wall_count    = 0
+missing_wall_count = 0
+
+active_curve = None
+
+pub_cmd    = None
+pub_debug  = None
+pub_tunnel = None
+
+def safe_median(values):
+    valid = [v for v in values if not math.isinf(v) and not math.isnan(v) and v > 0.05]
+    if not valid:
+        return 999.0
+    valid.sort()
+    n = len(valid)
+    mid = n // 2
+    return valid[mid] if n % 2 != 0 else (valid[mid-1] + valid[mid]) / 2.0
+
+def get_trend(history):
+    if len(history) < 3:
+        return 0.0
+    return history[0] - history[-1]
+
+def reset_pid():
+    global pid_integral, steer_prev
+    pid_integral = 0.0
+    steer_prev   = 0.0
+
+def reset_filters():
+    filter_left.clear(); filter_right.clear(); filter_front.clear()
+    left_history.clear(); right_history.clear()
+
+def pid_center(error):
+    global pid_integral
+    pid_integral += error
+    pid_integral  = max(-1.0, min(1.0, pid_integral))
+    output = cfg['kp'] * error + cfg['ki'] * pid_integral
+    return max(-cfg['max_steer'], min(cfg['max_steer'], output))
+
+def stop_carbot():
+    global steer_prev
+    if pub_cmd is not None:
+        pub_cmd.publish(Twist())
+    steer_prev = 0.0
+
+def scan_callback(msg):
+    global last_left, last_right, last_front
+    global dual_wall_count, missing_wall_count, TUNNEL_ACTIVE
+
+    left_vals = []; right_vals = []; front_vals = []
+
+    for i, r in enumerate(msg.ranges):
+        if math.isinf(r) or math.isnan(r) or r < 0.05:
+            continue
+        
+        # Baca sudut sebenar
+        angle_deg = math.degrees(msg.angle_min + i * msg.angle_increment)
+        
+        # Baca sudut sebenar (TANPA INVERT)
+        angle_deg = math.degrees(msg.angle_min + i * msg.angle_increment)
+
+        if cfg['left_zone_min'] <= angle_deg <= cfg['left_zone_max'] and r <= cfg['wall_max_range']:
+            left_vals.append(r)
+        elif cfg['right_zone_min'] <= angle_deg <= cfg['right_zone_max'] and r <= cfg['wall_max_range']:
+            right_vals.append(r)
+        if -15 <= angle_deg <= 15:
+            front_vals.append(r)
+
+    if left_vals:
+        filter_left.append(safe_median(left_vals))
+        last_left = safe_median(list(filter_left))
+    else:
+        last_left = 999.0
+
+    if right_vals:
+        filter_right.append(safe_median(right_vals))
+        last_right = safe_median(list(filter_right))
+    else:
+        last_right = 999.0
+
+    if front_vals:
+        filter_front.append(safe_median(front_vals))
+        last_front = safe_median(list(filter_front))
+    else:
+        last_front = 999.0
+
+    left_history.append(last_left)
+    right_history.append(last_right)
+
+    dual_wall_detected = (len(left_vals) > 0 and len(right_vals) > 0)
+    any_wall_detected  = (len(left_vals) > 0 or len(right_vals) > 0)
+
+    tunnel_width = last_left + last_right
+    width_valid  = (cfg['tunnel_min_width'] <= tunnel_width <= cfg['tunnel_max_width'])
+
+    if dual_wall_detected and width_valid:
+        dual_wall_count += 1
+    else:
+        dual_wall_count = 0
+
+    if not any_wall_detected:
+        missing_wall_count += 1
+    else:
+        missing_wall_count = 0
+
+    hf = cfg['hysteresis_frames']
+    if not TUNNEL_ACTIVE and dual_wall_count >= hf:
+        TUNNEL_ACTIVE = True
+        reset_pid()
+        rospy.logwarn("[TUNNEL] >>> MASUK TEROWONG (lebar=%.2fm) <<<" % tunnel_width)
+        if pub_tunnel: pub_tunnel.publish(Bool(data=True))
+    if TUNNEL_ACTIVE and missing_wall_count >= (hf * 2):
+        TUNNEL_ACTIVE = False
+        reset_pid(); reset_filters()
+        active_curve = None
+        rospy.loginfo("[TUNNEL] >>> KELUAR TEROWONG <<<")
+        if pub_tunnel: pub_tunnel.publish(Bool(data=False))
+
+    if pub_tunnel: pub_tunnel.publish(Bool(data=TUNNEL_ACTIVE))
+
+    if TUNNEL_ACTIVE and CARBOT_RUNNING:
+        navigate_tunnel()
+    else:
+        active_curve = None
+        publish_debug("IDLE", 0.0, 0.0)
+
+def navigate_tunnel():
+    global pid_integral, steer_prev
+    twist = Twist()
+    max_s = cfg['max_steer']
+    sign  = cfg.get('steer_sign', 1.0)
+
+    front_blocked = last_front < cfg['front_stop_dist']
+    left_blocked  = last_left  < cfg['min_wall_dist']
+    right_blocked = last_right < cfg['min_wall_dist']
+
+    if left_blocked and right_blocked:
+        rospy.logerr("[TUNNEL] Tersekat! F:%.2f L:%.2f R:%.2f" % (last_front, last_left, last_right))
+        stop_carbot()
+        publish_debug("STOP", 0.0, 0.0)
+        return
+
+    # CURVE MODE
+    global active_curve
+    if front_blocked:
+        # Jika belum commit ke mana-mana curve, kita buat keputusan sekarang
+        if active_curve is None:
+            if last_right > last_left:
+                active_curve = "CURVE_R"
+            else:
+                active_curve = "CURVE_L"
+        
+        # Gunakan keputusan yang dah di-lock
+        if active_curve == "CURVE_R":
+            target_steer = -max_s
+            mode = "CURVE_R"
+        else:
+            target_steer = max_s
+            mode = "CURVE_L"
+
+        steer = cfg['lp_alpha_curve'] * target_steer + (1 - cfg['lp_alpha_curve']) * steer_prev
+        steer_prev = steer
+        speed = max(cfg['min_speed'], cfg['tunnel_speed'] * (1.0 - abs(steer)/max_s))
+
+        twist.linear.x  = speed if cfg['motor_enabled'] else 0.0
+        twist.angular.z = steer * sign
+        pub_cmd.publish(twist)
+        publish_debug(mode, steer, speed)
+        return
+    else:
+        # Reset jika depan dah clear sikit (ada hysteresis sikit supaya tak goyang)
+        if last_front > cfg['front_stop_dist'] + 0.15:
+            active_curve = None
+
+    # CENTER MODE
+    left  = last_left  if last_left  < 2.0 else 0.60
+    right = last_right if last_right < 2.0 else 0.60
+
+    # FIX: left - right (Bila dekat dinding kanan, L besar, R kecil -> error positif -> steer KIRI)
+    center_error = left - right
+
+    wall_bias = 0.0; mode = "CENTER"
+    
+    # Dekat dinding KIRI -> tolak ke KANAN (Tolak / Negatif)
+    if left  < cfg['min_wall_dist'] + 0.05:
+        wall_bias -= cfg['kp_wall'] * (cfg['min_wall_dist'] + 0.05 - left)
+    
+    # Dekat dinding KANAN -> tolak ke KIRI (Tambah / Positif)
+    if right < cfg['min_wall_dist'] + 0.05:
+        wall_bias += cfg['kp_wall'] * (cfg['min_wall_dist'] + 0.05 - right)
+        
+    if wall_bias < -0.05: mode = "WALL_BIAS_L"
+    elif wall_bias > 0.05: mode = "WALL_BIAS_R"
+
+    # FORWARD AVOIDANCE: Perlahankan kereta bila depan makin sempit.
+    front_warn   = cfg.get('front_warn_dist', 0.65)
+    front_avoid  = 0.0
+    front_factor = 1.0
+    if last_front < front_warn and last_front > cfg['front_stop_dist']:
+        urgency = (front_warn - last_front) / max(0.01, front_warn - cfg['front_stop_dist'])
+        urgency = max(0.0, min(1.0, urgency))
+        front_factor = max(0.4, 1.0 - urgency * 0.5)
+        
+        # SMART PRE-STEER: Mula membelok awal HANYA jika satu sisi jauh lebih luas (> 25cm beza).
+        # Ini mengelakkan kereta langgar dinding luar sebab lambat membelok,
+        # dan pada masa sama tak gelabah kalau beza cuma 2-3cm dalam terowong lurus.
+        diff = last_right - last_left
+        if diff > 0.25: 
+            front_avoid = -cfg['kp_front'] * urgency  # Kanan luas -> Belok Kanan awal
+        elif diff < -0.25:
+            front_avoid = cfg['kp_front'] * urgency   # Kiri luas -> Belok Kiri awal
+            
+        if front_avoid != 0.0:
+            mode = mode + "+FW_TURN"
+        else:
+            mode = mode + "+FW"
+
+    pid_steer = 0.0
+    if abs(center_error) < cfg['steer_deadzone']:
+        pid_integral = 0.0
+    else:
+        pid_steer = pid_center(center_error)
+
+    raw_steer = max(-max_s, min(max_s, pid_steer + wall_bias + front_avoid))
+    steer = cfg['lp_alpha'] * raw_steer + (1 - cfg['lp_alpha']) * steer_prev
+    steer_prev = steer
+
+    speed = max(cfg['min_speed'], cfg['tunnel_speed'] * (1.0 - abs(steer)/max_s))
+
+    twist.linear.x  = (speed * front_factor) if cfg['motor_enabled'] else 0.0
+    twist.angular.z = steer * sign
+    pub_cmd.publish(twist)
+    publish_debug(mode, steer, speed)
+
+def publish_debug(mode, steer, speed):
+    if pub_debug is None: return
+    pub_debug.publish(String(data="mode:%s L:%.3f R:%.3f F:%.3f steer:%+.3f spd:%.2f TUN:%d" % (
+        mode, last_left, last_right, last_front, steer, speed, int(TUNNEL_ACTIVE))))
+
+def status_callback(msg):
+    global CARBOT_RUNNING
+    if 'ST:R' in msg.data and not CARBOT_RUNNING:
+        CARBOT_RUNNING = True
+        rospy.loginfo("[TUNNEL] CARBOT RUNNING")
+    elif ('ST:S' in msg.data or 'ST:E' in msg.data) and CARBOT_RUNNING:
+        CARBOT_RUNNING = False
+        stop_carbot()
+        rospy.loginfo("[TUNNEL] CARBOT STOPPED")
+
+def main():
+    global pub_cmd, pub_debug, pub_tunnel
+    rospy.init_node('tunnel_nav_dashboard')
+    try:
+        Server(TunnelNavConfig, reconfigure_callback)
+    except Exception as e:
+        rospy.logwarn("[TUNNEL] Dynamic reconfigure: %s" % str(e))
+    pub_cmd    = rospy.Publisher('/cmd_vel',          Twist,  queue_size=1)
+    pub_debug  = rospy.Publisher('/tunnel_nav/debug', String, queue_size=1)
+    pub_tunnel = rospy.Publisher('/tunnel_active',    Bool,   queue_size=1)
+    rospy.Subscriber('/scan',          LaserScan, scan_callback)
+    rospy.Subscriber('/carbot/status', String,    status_callback)
+    rospy.loginfo("[DASHBOARD] Tunnel Nav Dashboard ready")
+    rospy.loginfo("[DASHBOARD] steer_sign=%.1f - tukar ke -1.0 via rqt_reconfigure jika steering terbalik" %
+                  cfg.get('steer_sign', -1.0))
+    rospy.spin()
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="UTF-8">
+<title>CarBot Tuning Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/roslibjs/1.3.0/roslib.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+    background: radial-gradient(circle at top left, #1e1b4b, #0f1115 70%);
+    background-attachment: fixed;
+    color: #e2e8f0;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+  header {
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 16px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  }
+  header h1 { 
+    font-size: 20px; 
+    margin: 0; 
+    background: linear-gradient(90deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+  }
+  .status-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #f59e0b; display: inline-block; margin-right: 8px;
+    animation: pulse-connecting 1s infinite;
+  }
+  .status-dot.connected {
+    background: #22c55e;
+    animation: pulse-ok 2s infinite;
+  }
+  .status-dot.disconnected {
+    background: #ef4444;
+    animation: none;
+  }
+  @keyframes pulse-connecting {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:0.4; transform:scale(0.8); }
+  }
+  @keyframes pulse-ok {
+    0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
+    50%      { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+  }
+
+  .tabs {
+    display: flex;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    padding: 0 12px;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 14px 22px;
+    cursor: pointer;
+    color: #94a3b8;
+    border-bottom: 2px solid transparent;
+    font-weight: 500;
+    font-size: 14px;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+  }
+  .tab:hover {
+    color: #f8fafc;
+    background: rgba(255,255,255,0.03);
+  }
+  .tab.active {
+    color: #38bdf8;
+    border-bottom: 2px solid #38bdf8;
+    background: rgba(56, 189, 248, 0.05);
+  }
+
+  .page { display: none; padding: 24px 28px; }
+  .page.active { display: block; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: rgba(30, 41, 59, 0.45);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 22px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card:hover {
+    box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.3);
+  }
+  .card h3 {
+    margin: 0 0 16px 0;
+    font-size: 14px;
+    color: #cbd5e1;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+  }
+
+  .slider-row {
+    margin-bottom: 16px;
+  }
+  .slider-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .slider-label .val {
+    color: #3b82f6;
+    font-weight: 600;
+    font-family: monospace;
+  }
+  input[type=range] {
+    width: 100%;
+    accent-color: #3b82f6;
+  }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .status-item {
+    background: #0f1115;
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+  }
+  .status-item .label { font-size: 11px; color: #888; }
+  .status-item .value { font-size: 18px; font-weight: 700; margin-top: 4px; font-family: monospace; }
+
+  .badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge.center { background: #1e3a8a; color: #93c5fd; }
+  .badge.curve  { background: #78350f; color: #fdba74; }
+  .badge.stop   { background: #7f1d1d; color: #fca5a5; }
+  .badge.idle   { background: #1f2937; color: #9ca3af; }
+  .badge.tunnel { background: #14532d; color: #86efac; }
+
+  img.stream {
+    width: 100%;
+    border-radius: 8px;
+    background: #000;
+    display: block;
+  }
+  .stream-wrapper {
+    position: relative;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    min-height: 180px;
+  }
+  .stream-wrapper .stream-label {
+    position: absolute;
+    top: 8px; left: 10px;
+    background: rgba(0,0,0,0.55);
+    color: #94a3b8;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.4px;
+  }
+
+  /* Camera tab — 1 wide col + 1 side col on large screens */
+  .camera-grid {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: 20px;
+  }
+  @media (max-width: 1000px) { .camera-grid { grid-template-columns: 1fr; } }
+
+  /* HSV sliders coloured track */
+  .hsv-sliders .slider-row { margin-bottom: 14px; }
+  .hsv-group-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #64748b;
+    margin: 14px 0 6px;
+    border-top: 1px solid #2a2e38;
+    padding-top: 10px;
+  }
+  .hsv-group-label:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+  input.hue   { accent-color: #f59e0b; }
+  input.sat   { accent-color: #06b6d4; }
+  input.val   { accent-color: #a78bfa; }
+
+  .hsv-preview {
+    width: 100%;
+    height: 40px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+    border: 1px solid #2a2e38;
+    transition: background 0.3s;
+  }
+
+  .toggle-btn {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .toggle-btn.on { background: #14532d; border-color: #22c55e; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CarBot Tuning Dashboard</h1>
+  <div><span id="statusDot" class="status-dot"></span><span id="statusText">Menyambung...</span></div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-page="tunnel">Tunnel Nav</div>
+  <div class="tab" data-page="hill">Hill Climb</div>
+  <div class="tab" data-page="camera">Camera / YOLO</div>
+  <div class="tab" data-page="autohsv">Auto HSV Tuning</div>
+  <div class="tab" data-page="lane">Lane Tuning</div>
+  <div class="tab" data-page="parking">Parking Tuning</div>
+  <div class="tab" data-page="autotune">Auto-Tune PID</div>
+  <div class="tab" data-page="autotune_tunnel">Auto-Tune TUNNEL</div>
+  <div class="tab" data-page="status">System Status</div>
+</div>
+
+<!-- ==================== LANE TUNING TAB ==================== -->
+<div class="page" id="page-lane">
+  <div class="grid">
+    <div class="card">
+      <h3>PID Steering Control</h3>
+      <div class="slider-row">
+        <div class="slider-label">KP <span class="val" id="vl_kp">0.008</span></div>
+        <input type="range" id="sl_kp" min="0" max="0.05" step="0.001" value="0.008">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">KI <span class="val" id="vl_ki">0.0001</span></div>
+        <input type="range" id="sl_ki" min="0" max="0.005" step="0.0001" value="0.0001">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">KD <span class="val" id="vl_kd">0.004</span></div>
+        <input type="range" id="sl_kd" min="0" max="0.02" step="0.001" value="0.004">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Max Steer <span class="val" id="vl_maxsteer">0.6</span></div>
+        <input type="range" id="sl_maxsteer" min="0" max="1.0" step="0.05" value="0.6">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Deadzone <span class="val" id="vl_deadzone">5</span></div>
+        <input type="range" id="sl_deadzone" min="0" max="30" step="1" value="5">
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>Speed & Filter</h3>
+      <div class="slider-row">
+        <div class="slider-label">Base Speed <span class="val" id="vl_speed">0.20</span></div>
+        <input type="range" id="sl_speed" min="0" max="0.8" step="0.05" value="0.20">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Min Speed <span class="val" id="vl_minspeed">0.10</span></div>
+        <input type="range" id="sl_minspeed" min="0" max="0.5" step="0.05" value="0.10">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Low-Pass Alpha <span class="val" id="vl_lp">0.3</span></div>
+        <input type="range" id="sl_lp" min="0.05" max="1.0" step="0.05" value="0.3">
+      </div>
+      <button class="toggle-btn" onclick="sendLaneReconfigure('save_config', true)" style="width:100%;margin-top:20px;background:#34d399;">
+        💾 Save to lane_follow_config.json
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PARKING TUNING TAB ==================== -->
+<div class="page" id="page-parking">
+  <div class="grid">
+    <div class="card">
+      <h3>Parallel Parking Distances (cm)</h3>
+      <div class="slider-row">
+        <div class="slider-label">Forward Dist <span class="val" id="vp_parfwd">15.0</span></div>
+        <input type="range" id="sp_parfwd" min="5" max="50" step="1" value="15.0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Reverse Dist <span class="val" id="vp_parrev">35.0</span></div>
+        <input type="range" id="sp_parrev" min="10" max="80" step="1" value="35.0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Steer Angle <span class="val" id="vp_parsteer">0.80</span></div>
+        <input type="range" id="sp_parsteer" min="0.1" max="1.0" step="0.05" value="0.80">
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>Perpendicular & Speed</h3>
+      <div class="slider-row">
+        <div class="slider-label">Perp Forward Dist <span class="val" id="vp_perpfwd">10.0</span></div>
+        <input type="range" id="sp_perpfwd" min="0" max="40" step="1" value="10.0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Perp Reverse Dist <span class="val" id="vp_perprev">30.0</span></div>
+        <input type="range" id="sp_perprev" min="10" max="80" step="1" value="30.0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Forward Speed <span class="val" id="vp_spd">0.15</span></div>
+        <input type="range" id="sp_spd" min="0.05" max="0.5" step="0.05" value="0.15">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Reverse Speed <span class="val" id="vp_revspd">-0.15</span></div>
+        <input type="range" id="sp_revspd" min="-0.5" max="-0.05" step="0.05" value="-0.15">
+      </div>
+      <button class="toggle-btn" onclick="sendParkingReconfigure('save_config', true)" style="width:100%;margin-top:20px;background:#34d399;">
+        💾 Save to parking_config.json
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== AUTOTUNE PID TAB ==================== -->
+<div class="page" id="page-autotune">
+  <div class="grid">
+    <div class="card">
+      <h3>Twiddle Status</h3>
+      <div class="status-item" style="text-align:left; padding:15px; margin-bottom:15px;">
+        <div style="color:#60a5fa; font-weight:bold; font-size:15px; margin-bottom:5px;" id="tw_msg">Sila jalankan arahan ini di terminal Jetson:</div>
+        <div style="background:#0f172a; padding:8px 12px; border-radius:4px; font-family:monospace; color:#38bdf8; font-size:13px; margin-bottom:15px; user-select:all; border:1px solid #1e293b;">
+          python3 ~/ros_ws/src/carbot/scripts/autotune_twiddle.py
+        </div>
+        <div style="font-size:14px; margin-bottom:10px;">Iterasi: <span id="tw_iter" style="font-family:monospace;font-weight:bold;">0</span></div>
+        
+        <div style="margin-top:10px; background:#1e293b; padding:10px; border-radius:6px; border:1px solid #334155;">
+          <strong style="color:#fcd34d;">Menguji PID Sekarang:</strong><br>
+          <span style="font-family:monospace; font-size:15px;">KP: <span id="tw_kp">-</span> | KI: <span id="tw_ki">-</span> | KD: <span id="tw_kd">-</span></span>
+        </div>
+        
+        <div style="margin-top:10px; background:#064e3b; padding:10px; border-radius:6px; border:1px solid #047857;">
+          <strong style="color:#34d399;">PID Terbaik Setakat Ini:</strong><br>
+          <span style="font-family:monospace; font-size:15px; color:#a7f3d0;">KP: <span id="tw_bkp">-</span> | KI: <span id="tw_bki">-</span> | KD: <span id="tw_bkd">-</span></span><br>
+          <div style="margin-top:5px; font-size:13px; color:#d1fae5;">Cost Terendah: <span id="tw_cost">-</span></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>Twiddle Control</h3>
+      <p style="font-size:13px; color:#9ca3af; line-height:1.5; margin-bottom:20px;">
+        Letakkan robot di tempat permulaan litar. Klik <b>Start Next Trial</b>. Robot akan dipandu menggunakan PID eksperimen secara automatik (pastikan butang fizikal robot dihidupkan jika ada). Skrip akan merekod ralat selama 15 saat. 
+        <br><br>Selepas robot berhenti, letak robot semula ke tempat permulaan untuk pusingan seterusnya.
+      </p>
+      
+      <button class="toggle-btn" id="btn_tw_next" onclick="sendTwiddleCmd('NEXT')" style="width:100%; height:55px; font-size:16px; font-weight:bold; background:#1e3a8a; border-color:#3b82f6; margin-bottom:12px; cursor:pointer;">
+        ▶️ Mula / Teruskan (Next Trial)
+      </button>
+      
+      <button class="toggle-btn" id="btn_tw_abort" onclick="sendTwiddleCmd('ABORT')" style="width:100%; height:45px; font-size:14px; background:#7f1d1d; border-color:#ef4444; cursor:pointer;">
+        ⏹️ Batal Trial Ini (Abort)
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== AUTOTUNE TUNNEL TAB ==================== -->
+<div class="page" id="page-autotune_tunnel">
+  <div class="grid">
+    <div class="card">
+      <h3>Twiddle Status (TUNNEL)</h3>
+      <div class="status-item" style="text-align:left; padding:15px; margin-bottom:15px;">
+        <div style="color:#60a5fa; font-weight:bold; font-size:15px; margin-bottom:5px;" id="twt_msg">Sila jalankan arahan ini di terminal Jetson:</div>
+        <div style="background:#0f172a; padding:8px 12px; border-radius:4px; font-family:monospace; color:#38bdf8; font-size:13px; margin-bottom:15px; user-select:all; border:1px solid #1e293b;">
+          python3 ~/ros_ws/src/carbot/scripts/autotune_twiddle_tunnel.py
+        </div>
+        <div style="font-size:14px; margin-bottom:10px;">Iterasi: <span id="twt_iter" style="font-family:monospace;font-weight:bold;">0</span></div>
+        
+        <div style="margin-top:10px; background:#1e293b; padding:10px; border-radius:6px; border:1px solid #334155;">
+          <strong style="color:#fcd34d;">Menguji PID Terowong Sekarang:</strong><br>
+          <span style="font-family:monospace; font-size:15px;">KP: <span id="twt_kp">-</span> | KD: <span id="twt_kd">-</span> | KP_WALL: <span id="twt_kp_wall">-</span></span>
+        </div>
+        
+        <div style="margin-top:10px; background:#064e3b; padding:10px; border-radius:6px; border:1px solid #047857;">
+          <strong style="color:#34d399;">PID Terbaik Setakat Ini:</strong><br>
+          <span style="font-family:monospace; font-size:15px; color:#a7f3d0;">KP: <span id="twt_bkp">-</span> | KD: <span id="twt_bkd">-</span> | KP_WALL: <span id="twt_bkp_wall">-</span></span><br>
+          <div style="margin-top:5px; font-size:13px; color:#d1fae5;">Cost Terendah: <span id="twt_cost">-</span></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>Tunnel Twiddle Control</h3>
+      <p style="font-size:13px; color:#9ca3af; line-height:1.5; margin-bottom:20px;">
+        Letakkan robot di tempat permulaan terowong. Klik <b>Start Next Trial</b>. Robot akan dipandu menggunakan PID eksperimen secara automatik. Skrip akan mengira perbezaan jarak kiri/kanan dinding selama 15 saat. 
+        <br><br>Jika robot terlanggar dinding (<15cm), sistem akan terbatal secara automatik dan merekod markah penalti.
+      </p>
+      
+      <button class="toggle-btn" id="btn_twt_next" onclick="sendTwiddleTunnelCmd('NEXT')" style="width:100%; height:55px; font-size:16px; font-weight:bold; background:#1e3a8a; border-color:#3b82f6; margin-bottom:12px; cursor:pointer;">
+        ▶️ Mula / Teruskan (Next Trial)
+      </button>
+      
+      <button class="toggle-btn" id="btn_twt_abort" onclick="sendTwiddleTunnelCmd('ABORT')" style="width:100%; height:45px; font-size:14px; background:#7f1d1d; border-color:#ef4444; cursor:pointer;">
+        ⏹️ Batal Trial Ini (Abort)
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TUNNEL NAV TAB ==================== -->
+<div class="page active" id="page-tunnel">
+  <div class="grid">
+    <div class="card">
+      <h3>PID Center Steering</h3>
+      <div class="slider-row">
+        <div class="slider-label">KP <span class="val" id="v_kp">1.20</span></div>
+        <input type="range" id="s_kp" min="0" max="5" step="0.05" value="1.2">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">KI <span class="val" id="v_ki">0.010</span></div>
+        <input type="range" id="s_ki" min="0" max="0.5" step="0.005" value="0.01">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">KD <span class="val" id="v_kd">0.80</span></div>
+        <input type="range" id="s_kd" min="0" max="5" step="0.05" value="0.8">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">KP_WALL (bias) <span class="val" id="v_kpwall">6.00</span></div>
+        <input type="range" id="s_kpwall" min="0" max="15" step="0.1" value="6.0">
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Steering & Speed</h3>
+      <div class="slider-row">
+        <div class="slider-label">MAX_STEER <span class="val" id="v_maxsteer">1.00</span></div>
+        <input type="range" id="s_maxsteer" min="0.1" max="1.0" step="0.05" value="1.0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">TUNNEL_SPEED <span class="val" id="v_speed">0.15</span></div>
+        <input type="range" id="s_speed" min="0.05" max="0.50" step="0.01" value="0.15">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">MIN_SPEED <span class="val" id="v_minspeed">0.08</span></div>
+        <input type="range" id="s_minspeed" min="0.05" max="0.30" step="0.01" value="0.08">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">LP_ALPHA_CURVE <span class="val" id="v_lpcurve">0.15</span></div>
+        <input type="range" id="s_lpcurve" min="0.05" max="1.0" step="0.01" value="0.15">
+      </div>
+      <button class="toggle-btn" id="btn_motor" onclick="toggleMotor()">Motor: ON</button>
+    </div>
+
+    <div class="card">
+      <h3>Distance Thresholds</h3>
+      <div class="slider-row">
+        <div class="slider-label">MIN_WALL_DIST (m) <span class="val" id="v_minwall">0.20</span></div>
+        <input type="range" id="s_minwall" min="0.05" max="0.50" step="0.01" value="0.20">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">FRONT_STOP_DIST (m) <span class="val" id="v_frontstop">0.40</span></div>
+        <input type="range" id="s_frontstop" min="0.10" max="1.00" step="0.01" value="0.40">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">WALL_MAX_RANGE (m) <span class="val" id="v_wallmax">0.60</span></div>
+        <input type="range" id="s_wallmax" min="0.10" max="2.00" step="0.01" value="0.60">
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Live Debug</h3>
+      <div class="status-grid">
+        <div class="status-item"><div class="label">MODE</div><div class="value" id="d_mode">-</div></div>
+        <div class="status-item"><div class="label">TUNNEL</div><div class="value" id="d_tunnel">-</div></div>
+        <div class="status-item"><div class="label">STEER</div><div class="value" id="d_steer">-</div></div>
+        <div class="status-item"><div class="label">SPEED</div><div class="value" id="d_speed">-</div></div>
+        <div class="status-item"><div class="label">LEFT</div><div class="value" id="d_left">-</div></div>
+        <div class="status-item"><div class="label">RIGHT</div><div class="value" id="d_right">-</div></div>
+        <div class="status-item" style="grid-column: span 3;"><div class="label">FRONT</div><div class="value" id="d_front">-</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== HILL CLIMB TAB ==================== -->
+<div class="page" id="page-hill">
+  <div class="grid">
+    <div class="card">
+      <h3>Slope Detection</h3>
+      <div class="slider-row">
+        <div class="slider-label">SLOPE_THRESHOLD (deg) <span class="val" id="v_slope">8.5</span></div>
+        <input type="range" id="s_slope" min="1" max="30" step="0.5" value="8.5">
+      </div>
+      <p style="color:#888; font-size:12px;">Belum wired - placeholder untuk hill climb speed compensation.</p>
+    </div>
+    <div class="card">
+      <h3>IMU Live</h3>
+      <div class="status-grid">
+        <div class="status-item"><div class="label">HEADING</div><div class="value" id="d_heading">-</div></div>
+        <div class="status-item"><div class="label">PITCH</div><div class="value" id="d_pitch">-</div></div>
+        <div class="status-item"><div class="label">ROLL (Slope)</div><div class="value" id="d_roll">-</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== CAMERA/YOLO TAB ==================== -->
+<div class="page" id="page-camera">
+  <div class="camera-grid">
+
+    <!-- Left: stream + detection log -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+      <div class="card">
+        <h3>🎥 CarBot POV — Lane Follow Overlay</h3>
+        <div class="stream-wrapper">
+          <span class="stream-label">/lane_follow/overlay_image</span>
+          <img class="stream" id="laneStream"
+               src="http://carbot-01.local:8081/stream?topic=/lane_follow/overlay_image"
+               alt="Menunggu stream CarBot...">
+        </div>
+      </div>
+      <div class="card">
+        <h3>YOLO Detection Log</h3>
+        <div id="d_detections" style="font-family:monospace; font-size:13px; max-height:220px; overflow-y:auto;">-</div>
+      </div>
+    </div>
+
+    <!-- Right: HSV tuning -->
+    <div class="card hsv-sliders">
+      <h3>🎨 HSV Lane Mask Tuning</h3>
+
+      <!-- Mask stream B&W -->
+      <div class="stream-wrapper" style="margin-bottom:12px;">
+        <span class="stream-label">/lane_follow/mask_image</span>
+        <img class="stream" id="maskStream"
+             src="http://carbot-01.local:8081/stream?topic=/lane_follow/mask_image&type=ros_compressed"
+             alt="Menunggu mask..."
+             style="filter: contrast(1.2);">
+      </div>
+
+      <!-- Live colour preview -->
+      <div id="hsvPreview" class="hsv-preview" title="Anggaran warna HSV min"></div>
+
+      <div class="hsv-group-label">Hue (0 – 179)</div>
+      <div class="slider-row">
+        <div class="slider-label">H_MIN <span class="val" id="v_hmin">0</span></div>
+        <input type="range" class="hue" id="s_hmin" min="0" max="179" step="1" value="0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">H_MAX <span class="val" id="v_hmax">30</span></div>
+        <input type="range" class="hue" id="s_hmax" min="0" max="179" step="1" value="30">
+      </div>
+
+      <div class="hsv-group-label">Saturation (0 – 255)</div>
+      <div class="slider-row">
+        <div class="slider-label">S_MIN <span class="val" id="v_smin">80</span></div>
+        <input type="range" class="sat" id="s_smin" min="0" max="255" step="1" value="80">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">S_MAX <span class="val" id="v_smax">255</span></div>
+        <input type="range" class="sat" id="s_smax" min="0" max="255" step="1" value="255">
+      </div>
+
+      <div class="hsv-group-label">Value / Brightness (0 – 255)</div>
+      <div class="slider-row">
+        <div class="slider-label">V_MIN <span class="val" id="v_vmin">50</span></div>
+        <input type="range" class="val" id="s_vmin" min="0" max="255" step="1" value="50">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">V_MAX <span class="val" id="v_vmax">255</span></div>
+        <input type="range" class="val" id="s_vmax" min="0" max="255" step="1" value="255">
+      </div>
+
+      <button class="toggle-btn" id="btn_hsv_send" onclick="sendAllHSV()" style="width:100%;margin-top:10px;">
+        📤 Hantar Semua HSV
+      </button>
+      <div id="hsv_status" style="margin-top:8px; font-size:11px; color:#64748b; text-align:center;">—</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ==================== SYSTEM STATUS TAB ==================== -->
+<div class="page" id="page-status">
+  <div class="card">
+    <h3>System Operation</h3>
+    <div class="status-grid" style="margin-bottom:15px;">
+      <div class="status-item" style="background:#1e3a8a; border-color:#3b82f6;">
+        <div class="label" style="color:#bfdbfe;">ACTIVE MODE (NODE)</div>
+        <div class="value" id="m_active_mode" style="color:#fff; font-size:18px;">-</div>
+      </div>
+    </div>
+    
+    <h3>Arduino Mega Status</h3>
+    <div class="status-grid">
+      <div class="status-item"><div class="label">STATE</div><div class="value" id="m_st">-</div></div>
+      <div class="status-item"><div class="label">SPEED PWM</div><div class="value" id="m_spd">-</div></div>
+      <div class="status-item"><div class="label">STEERING</div><div class="value" id="m_str">-</div></div>
+      <div class="status-item"><div class="label">RPM</div><div class="value" id="m_rpm">-</div></div>
+      <div class="status-item"><div class="label">ULTRASONIC</div><div class="value" id="m_us">-</div></div>
+      <div class="status-item"><div class="label">LDR</div><div class="value" id="m_ldr">-</div></div>
+      <div class="status-item"><div class="label">TUNNEL</div><div class="value" id="m_tun">-</div></div>
+      <div class="status-item"><div class="label">SLOPE</div><div class="value" id="m_slp">-</div></div>
+      <div class="status-item"><div class="label">DISTANCE (cm)</div><div class="value" id="m_d">-</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== AUTO HSV TAB ==================== -->
+<div class="page" id="page-autohsv">
+  <div class="grid">
+    <div class="card">
+      <h3>Captured Camera Feed</h3>
+      <div class="stream-wrapper">
+        <img class="stream" id="autoHsvLaneStream"
+             src="/calib_original.jpg"
+             alt="Belum ada tangkapan gambar. Sila klik Start Calibrate."
+             onerror="this.src=''">
+      </div>
+    </div>
+    <div class="card">
+      <h3>Captured HSV Mask</h3>
+      <div class="stream-wrapper">
+        <img class="stream" id="autoHsvMaskStream"
+             src="/calib_mask.jpg"
+             alt="Belum ada tangkapan mask. Sila klik Start Calibrate."
+             onerror="this.src=''">
+      </div>
+      <div style="margin-top: 15px;">
+        <button class="toggle-btn" id="btn_start_calib" onclick="startCalibration()" style="background:#1e3a8a; border-color:#3b82f6; width:100%; margin-bottom:8px;">Start Calibrate</button>
+        
+        <div id="calib_results" style="display:none; background:#171a21; padding:15px; border:1px solid #2a2e38; border-radius:6px; margin-bottom:15px;">
+          <h4 style="margin-top:0; margin-bottom:10px; color:#3b82f6;">Calibration Results</h4>
+          <div style="font-size:13px; line-height:1.6; font-family:monospace;">
+            <div>Method: <span id="res_method">-</span></div>
+            <div>Confidence: <span id="res_conf">-</span></div>
+            <div>Coverage: <span id="res_cov">-</span></div>
+            <div>Status: <span id="res_status">-</span></div>
+            <div style="margin-top:8px;"><strong>Proposed HSV:</strong></div>
+            <div>Lower: <span id="res_lower">-</span></div>
+            <div>Upper: <span id="res_upper">-</span></div>
+          </div>
+        </div>
+
+        <div id="calib_actions" style="display:none; display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <button class="toggle-btn" id="btn_recalib" onclick="startCalibration()" style="background:#374151;">Recalibrate</button>
+          <button class="toggle-btn" id="btn_save_calib" onclick="saveCalibration()" style="background:#14532d; border-color:#22c55e;">Save Calibration</button>
+          <button class="toggle-btn" id="btn_quit_calib" onclick="quitCalibration()" style="background:#7f1d1d; border-color:#ef4444;">Quit</button>
+        </div>
+      </div>
+      <p style="margin-top: 15px; font-size: 13px; color: #9ca3af; line-height: 1.5;">
+        <strong>NOTA:</strong> Kamera (carbot.service) WAJIB berjalan untuk calibrate. Save akan otomatis restart node kameranya.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================== ROSBRIDGE CONNECTION ====================
+var ROS_URL = 'ws://' + window.location.hostname + ':9090';
+var ros = null;
+var reconnectTimer = null;
+
+function setStatus(state, msg) {
+  var dot  = document.getElementById('statusDot');
+  var text = document.getElementById('statusText');
+  dot.classList.remove('connected', 'disconnected');
+  if (state === 'connected')    dot.classList.add('connected');
+  if (state === 'disconnected') dot.classList.add('disconnected');
+  text.innerText = msg;
+}
+
+function connectRos() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  setStatus('connecting', 'Menyambung...');
+
+  ros = new ROSLIB.Ros({ url: ROS_URL });
+
+  ros.on('connection', function() {
+    setStatus('connected', 'ROS Connected ✓');
+    // Re-subscribe semua topik selepas reconnect
+    subscribeTopics();
+  });
+
+  ros.on('close', function() {
+    setStatus('disconnected', 'Terputus — cuba semula dalam 5s...');
+    reconnectTimer = setTimeout(connectRos, 5000);
+  });
+
+  ros.on('error', function(e) {
+    setStatus('disconnected', 'Ralat WS — cuba semula dalam 5s...');
+    reconnectTimer = setTimeout(connectRos, 5000);
+  });
+}
+
+// ==================== TAB SWITCHING ====================
+document.querySelectorAll('.tab').forEach(function(tab) {
+  tab.addEventListener('click', function() {
+    document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+    document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+    tab.classList.add('active');
+    document.getElementById('page-' + tab.dataset.page).classList.add('active');
+  });
+});
+
+// ==================== DYNAMIC RECONFIGURE CLIENT ====================
+var dynParam = new ROSLIB.Param({ ros: ros, name: '' });
+
+function setParam(paramName, value) {
+  var param = new ROSLIB.Param({ ros: ros, name: '/tunnel_nav_dashboard/' + paramName });
+  param.set(value);
+}
+
+// Slider bindings - hantar via rosservice dynamic_reconfigure
+function bindSlider(sliderId, valId, paramName, decimals) {
+  var slider = document.getElementById(sliderId);
+  var valEl  = document.getElementById(valId);
+  slider.addEventListener('input', function() {
+    var v = parseFloat(slider.value);
+    valEl.innerText = v.toFixed(decimals);
+    sendReconfigure(paramName, v);
+  });
+}
+
+function sendReconfigure(paramName, value) {
+  var configClient = new ROSLIB.Service({
+    ros: ros,
+    name: '/tunnel_nav_dashboard/set_parameters',
+    serviceType: 'dynamic_reconfigure/Reconfigure'
+  });
+
+  var isInt = (paramName === 'hysteresis_frames' ||
+               paramName === 'left_zone_min' || paramName === 'left_zone_max' ||
+               paramName === 'right_zone_min' || paramName === 'right_zone_max');
+
+  var req = {
+    config: {
+      bools: [],
+      ints: isInt ? [{name: paramName, value: parseInt(value)}] : [],
+      strs: [],
+      doubles: isInt ? [] : [{name: paramName, value: value}],
+      groups: []
+    }
+  };
+
+  configClient.callService(req, function(){}, function(err){ console.log('reconfigure err', err); });
+}
+
+function sendLaneReconfigure(paramName, value) {
+  var configClient = new ROSLIB.Service({
+    ros: ros,
+    name: '/lane_follow/set_parameters',
+    serviceType: 'dynamic_reconfigure/Reconfigure'
+  });
+
+  var isInt = (paramName === 'steer_deadzone' || paramName === 'save_config');
+  var isBool = (paramName === 'save_config');
+
+  var req = {
+    config: {
+      bools: isBool ? [{name: paramName, value: value === true}] : [],
+      ints: (isInt && !isBool) ? [{name: paramName, value: parseInt(value)}] : [],
+      strs: [],
+      doubles: (!isInt && !isBool) ? [{name: paramName, value: parseFloat(value)}] : [],
+      groups: []
+    }
+  };
+
+  configClient.callService(req, function(){ 
+    if(isBool) alert("Lane config saved!"); 
+  }, function(err){ console.log('reconfigure err', err); });
+}
+
+function bindLaneSlider(sliderId, valId, paramName, dec) {
+  var s = document.getElementById(sliderId);
+  var v = document.getElementById(valId);
+  if(!s || !v) return;
+  s.addEventListener('input', function() {
+    v.innerText = parseFloat(s.value).toFixed(dec);
+  });
+  s.addEventListener('change', function() {
+    var val = parseFloat(s.value);
+    sendLaneReconfigure(paramName, val);
+  });
+}
+
+// Bind Tunnel Sliders
+bindSlider('s_kp', 'v_kp', 'kp', 2);
+bindSlider('s_ki', 'v_ki', 'ki', 3);
+bindSlider('s_kd', 'v_kd', 'kd', 2);
+bindSlider('s_kpwall', 'v_kpwall', 'kp_wall', 2);
+bindSlider('s_maxsteer', 'v_maxsteer', 'max_steer', 2);
+bindSlider('s_speed', 'v_speed', 'tunnel_speed', 2);
+bindSlider('s_minspeed', 'v_minspeed', 'min_speed', 2);
+bindSlider('s_lpcurve', 'v_lpcurve', 'lp_alpha_curve', 2);
+bindSlider('s_minwall', 'v_minwall', 'min_wall_dist', 2);
+bindSlider('s_frontstop', 'v_frontstop', 'front_stop_dist', 2);
+bindSlider('s_wallmax', 'v_wallmax', 'wall_max_range', 2);
+
+// Bind Lane Sliders
+bindLaneSlider('sl_kp', 'vl_kp', 'kp', 4);
+bindLaneSlider('sl_ki', 'vl_ki', 'ki', 4);
+bindLaneSlider('sl_kd', 'vl_kd', 'kd', 4);
+bindLaneSlider('sl_maxsteer', 'vl_maxsteer', 'max_steer', 2);
+bindLaneSlider('sl_deadzone', 'vl_deadzone', 'steer_deadzone', 0);
+bindLaneSlider('sl_speed', 'vl_speed', 'base_speed', 2);
+bindLaneSlider('sl_minspeed', 'vl_minspeed', 'min_speed', 2);
+bindLaneSlider('sl_lp', 'vl_lp', 'lp_alpha', 2);
+
+function sendParkingReconfigure(paramName, value) {
+  var configClient = new ROSLIB.Service({
+    ros: ros,
+    name: '/parking_nav/set_parameters',
+    serviceType: 'dynamic_reconfigure/Reconfigure'
+  });
+  var isBool = (paramName === 'save_config');
+  var req = {
+    config: {
+      bools: isBool ? [{name: paramName, value: value === true}] : [],
+      ints: [],
+      strs: [],
+      doubles: (!isBool) ? [{name: paramName, value: parseFloat(value)}] : [],
+      groups: []
+    }
+  };
+  configClient.callService(req, function(){ 
+    if(isBool) alert("Parking config saved!"); 
+  }, function(err){ console.log('reconfigure err', err); });
+}
+
+function bindParkingSlider(sliderId, valId, paramName, dec) {
+  var s = document.getElementById(sliderId);
+  var v = document.getElementById(valId);
+  if(!s || !v) return;
+  s.addEventListener('input', function() { v.innerText = parseFloat(s.value).toFixed(dec); });
+  s.addEventListener('change', function() { sendParkingReconfigure(paramName, parseFloat(s.value)); });
+}
+
+// Bind Parking Sliders
+bindParkingSlider('sp_parfwd', 'vp_parfwd', 'parallel_forward_dist', 1);
+bindParkingSlider('sp_parrev', 'vp_parrev', 'parallel_reverse_dist', 1);
+bindParkingSlider('sp_parsteer', 'vp_parsteer', 'parallel_steer_angle', 2);
+bindParkingSlider('sp_perpfwd', 'vp_perpfwd', 'perp_forward_dist', 1);
+bindParkingSlider('sp_perprev', 'vp_perprev', 'perp_reverse_dist', 1);
+bindParkingSlider('sp_spd', 'vp_spd', 'parking_speed', 2);
+bindParkingSlider('sp_revspd', 'vp_revspd', 'parking_reverse_speed', 2);
+
+var motorOn = true;
+function toggleMotor() {
+  motorOn = !motorOn;
+  var btn = document.getElementById('btn_motor');
+  btn.innerText = 'Motor: ' + (motorOn ? 'ON' : 'OFF');
+  btn.classList.toggle('on', motorOn);
+  sendReconfigure('motor_enabled', motorOn);
+}
+
+// ==================== SUBSCRIBE TOPICS ====================
+var debugTopic, statusTopic, imuTopic, yoloTopic, twiddleCmdTopic, twiddleStatusTopic, twiddleTunnelCmdTopic, twiddleTunnelStatusTopic;
+
+function sendTwiddleTunnelCmd(cmd) {
+  if (twiddleTunnelCmdTopic) {
+    twiddleTunnelCmdTopic.publish(new ROSLIB.Message({ data: cmd }));
+  }
+}
+
+function sendTwiddleCmd(cmd) {
+  if (twiddleCmdTopic) {
+    twiddleCmdTopic.publish(new ROSLIB.Message({ data: cmd }));
+  }
+}
+
+function subscribeTopics() {
+  // Unsubscribe lama jika ada
+  if (debugTopic)  debugTopic.unsubscribe();
+  if (statusTopic) statusTopic.unsubscribe();
+  if (imuTopic)    imuTopic.unsubscribe();
+  if (yoloTopic)   yoloTopic.unsubscribe();
+  if (twiddleStatusTopic) twiddleStatusTopic.unsubscribe();
+  if (twiddleTunnelStatusTopic) twiddleTunnelStatusTopic.unsubscribe();
+
+  twiddleTunnelCmdTopic = new ROSLIB.Topic({
+    ros: ros, name: '/autotune_tunnel/cmd', messageType: 'std_msgs/String'
+  });
+
+  twiddleTunnelStatusTopic = new ROSLIB.Topic({
+    ros: ros, name: '/autotune_tunnel/status', messageType: 'std_msgs/String'
+  });
+  twiddleTunnelStatusTopic.subscribe(function(msg) {
+    try {
+      var data = JSON.parse(msg.data);
+      document.getElementById('twt_msg').innerText = data.msg;
+      document.getElementById('twt_iter').innerText = data.iteration;
+      if(data.testing_params) {
+        document.getElementById('twt_kp').innerText = data.testing_params.kp.toFixed(5);
+        document.getElementById('twt_kd').innerText = data.testing_params.kd.toFixed(5);
+        document.getElementById('twt_kp_wall').innerText = data.testing_params.kp_wall.toFixed(5);
+      }
+      if(data.best_params) {
+        document.getElementById('twt_bkp').innerText = data.best_params.kp.toFixed(5);
+        document.getElementById('twt_bkd').innerText = data.best_params.kd.toFixed(5);
+        document.getElementById('twt_bkp_wall').innerText = data.best_params.kp_wall.toFixed(5);
+      }
+      document.getElementById('twt_cost').innerText = data.best_cost.toFixed(4);
+      
+      var btnNext = document.getElementById('btn_twt_next');
+      if (data.trial_active) {
+        btnNext.style.background = '#4b5563';
+        btnNext.style.borderColor = '#6b7280';
+        btnNext.innerText = 'Merekod... Sila pantau robot';
+        btnNext.disabled = true;
+      } else {
+        btnNext.style.background = '#1e3a8a';
+        btnNext.style.borderColor = '#3b82f6';
+        btnNext.innerText = '▶️ Mula / Teruskan (Next Trial)';
+        btnNext.disabled = false;
+      }
+    } catch(e){}
+  });
+
+  twiddleCmdTopic = new ROSLIB.Topic({
+    ros: ros, name: '/autotune/cmd', messageType: 'std_msgs/String'
+  });
+
+  twiddleStatusTopic = new ROSLIB.Topic({
+    ros: ros, name: '/autotune/status', messageType: 'std_msgs/String'
+  });
+  twiddleStatusTopic.subscribe(function(msg) {
+    try {
+      var data = JSON.parse(msg.data);
+      document.getElementById('tw_msg').innerText = data.msg;
+      document.getElementById('tw_iter').innerText = data.iteration;
+      if(data.testing_params) {
+        document.getElementById('tw_kp').innerText = data.testing_params.kp.toFixed(5);
+        document.getElementById('tw_ki').innerText = data.testing_params.ki.toFixed(5);
+        document.getElementById('tw_kd').innerText = data.testing_params.kd.toFixed(5);
+      }
+      if(data.best_params) {
+        document.getElementById('tw_bkp').innerText = data.best_params.kp.toFixed(5);
+        document.getElementById('tw_bki').innerText = data.best_params.ki.toFixed(5);
+        document.getElementById('tw_bkd').innerText = data.best_params.kd.toFixed(5);
+      }
+      document.getElementById('tw_cost').innerText = data.best_cost.toFixed(2);
+      
+      var btnNext = document.getElementById('btn_tw_next');
+      if (data.trial_active) {
+        btnNext.style.background = '#4b5563';
+        btnNext.style.borderColor = '#6b7280';
+        btnNext.innerText = 'Merekod... Sila pantau robot';
+        btnNext.disabled = true;
+      } else {
+        btnNext.style.background = '#1e3a8a';
+        btnNext.style.borderColor = '#3b82f6';
+        btnNext.innerText = '▶️ Mula / Teruskan (Next Trial)';
+        btnNext.disabled = false;
+      }
+    } catch(e){}
+  });
+
+  debugTopic = new ROSLIB.Topic({
+    ros: ros, name: '/tunnel_nav/debug', messageType: 'std_msgs/String'
+  });
+  debugTopic.subscribe(function(msg) {
+    var parts = msg.data.split(' ');
+    var map = {};
+    parts.forEach(function(p) { var kv = p.split(':'); if (kv.length === 2) map[kv[0]] = kv[1]; });
+    document.getElementById('d_mode').innerText   = map.mode || '-';
+    document.getElementById('d_left').innerText   = map.L    || '-';
+    document.getElementById('d_right').innerText  = map.R    || '-';
+    document.getElementById('d_front').innerText  = map.F    || '-';
+    document.getElementById('d_steer').innerText  = map.steer || '-';
+    document.getElementById('d_speed').innerText  = map.spd  || '-';
+    document.getElementById('d_tunnel').innerText = (map.TUN === '1') ? 'YES' : 'NO';
+  });
+
+  statusTopic = new ROSLIB.Topic({
+    ros: ros, name: '/carbot/status', messageType: 'std_msgs/String'
+  });
+  statusTopic.subscribe(function(msg) {
+    var parts = msg.data.split(' ');
+    var map = {};
+    parts.forEach(function(p) { var kv = p.split(':'); if (kv.length === 2) map[kv[0]] = kv[1]; });
+    document.getElementById('m_st').innerText  = map.ST  || '-';
+    document.getElementById('m_spd').innerText = map.SPD || '-';
+    document.getElementById('m_str').innerText = map.STR || '-';
+    document.getElementById('m_rpm').innerText = map.RPM || '-';
+    document.getElementById('m_us').innerText  = map.US  || '-';
+    document.getElementById('m_ldr').innerText = map.LDR || '-';
+    document.getElementById('m_tun').innerText = map.TUN || '-';
+    document.getElementById('m_slp').innerText = map.SLP || '-';
+    document.getElementById('m_d').innerText   = map.D   || '-';
+  });
+
+  imuTopic = new ROSLIB.Topic({
+    ros: ros, name: '/carbot/imu', messageType: 'std_msgs/String'
+  });
+  imuTopic.subscribe(function(msg) {
+    var parts = msg.data.split(' ');
+    var map = {};
+    parts.forEach(function(p) { var kv = p.split(':'); if (kv.length === 2) map[kv[0]] = kv[1]; });
+    document.getElementById('d_heading').innerText = map.H || '-';
+    document.getElementById('d_pitch').innerText   = map.P || '-';
+    document.getElementById('d_roll').innerText    = map.R || '-';
+  });
+
+  yoloTopic = new ROSLIB.Topic({
+    ros: ros, name: '/yolo/detections', messageType: 'std_msgs/String'
+  });
+  yoloTopic.subscribe(function(msg) {
+    var el = document.getElementById('d_detections');
+    var line = document.createElement('div');
+    line.innerText = new Date().toLocaleTimeString() + ' - ' + msg.data;
+    el.insertBefore(line, el.firstChild);
+    while (el.children.length > 30) el.removeChild(el.lastChild);
+  });
+
+  var activeNodeTopic = new ROSLIB.Topic({
+    ros: ros, name: '/tunnel_nav/active', messageType: 'std_msgs/Bool'
+  });
+  activeNodeTopic.subscribe(function(msg) {
+    var mode = msg.data ? 'TUNNEL NAV' : 'LANE FOLLOW';
+    var color = msg.data ? '#fbbf24' : '#34d399';
+    var el = document.getElementById('m_active_mode');
+    if(el) {
+      el.innerText = mode;
+      el.style.color = color;
+    }
+  });
+}
+
+// Camera stream — lane_follow overlay (hardcoded ke carbot-01.local)
+// laneStream src sudah ditetapkan terus dalam HTML img tag.
+// YOLO annotated stream (jika ada elemen lain yang memerlukannya):
+// var yoloStreamEl = document.getElementById('camStream');
+// if (yoloStreamEl) yoloStreamEl.src = 'http://carbot-01.local:8081/stream?topic=/yolo/annotated_image';
+
+// ==================== HSV TUNING ====================
+function sendLaneReconfigure(paramName, value) {
+  var svc = new ROSLIB.Service({
+    ros: ros,
+    name: '/lane_follow/set_parameters',
+    serviceType: 'dynamic_reconfigure/Reconfigure'
+  });
+  var req = {
+    config: {
+      bools: [], strs: [], groups: [],
+      ints:    [{name: paramName, value: parseInt(value)}],
+      doubles: []
+    }
+  };
+  svc.callService(req,
+    function()  { setHsvStatus('✅ ' + paramName + ' = ' + value); },
+    function(e) { setHsvStatus('⚠️ Gagal: ' + e); }
+  );
+}
+
+function setHsvStatus(msg) {
+  var el = document.getElementById('hsv_status');
+  if (el) { el.innerText = msg; }
+}
+
+function updateHsvPreview() {
+  var h = parseInt(document.getElementById('s_hmin').value);
+  var s = parseInt(document.getElementById('s_smin').value);
+  var v = parseInt(document.getElementById('s_vmin').value);
+  // OpenCV HSV → CSS hsl: H*2, S/255*100%, V/255*100%
+  var cssH = h * 2;
+  var cssS = Math.round(s / 255 * 100);
+  var cssL = Math.round(v / 255 * 50); // rough approx
+  var preview = document.getElementById('hsvPreview');
+  if (preview) preview.style.background =
+    'linear-gradient(90deg, hsl(' + cssH + ',' + cssS + '%,' + cssL + '%) 0%, ' +
+    'hsl(' + (parseInt(document.getElementById('s_hmax').value)*2) + ',' +
+    Math.round(parseInt(document.getElementById('s_smax').value)/255*100) + '%,' +
+    Math.round(parseInt(document.getElementById('s_vmax').value)/255*50) + '%) 100%)';
+}
+
+function bindHsvSlider(sliderId, valId, paramName) {
+  var slider = document.getElementById(sliderId);
+  var valEl  = document.getElementById(valId);
+  if (!slider) return;
+  slider.addEventListener('input', function() {
+    valEl.innerText = slider.value;
+    updateHsvPreview();
+    sendLaneReconfigure(paramName, parseInt(slider.value));
+    setHsvStatus('⏳ ' + paramName + ' → ' + slider.value);
+  });
+}
+
+bindHsvSlider('s_hmin', 'v_hmin', 'h_min');
+bindHsvSlider('s_hmax', 'v_hmax', 'h_max');
+bindHsvSlider('s_smin', 'v_smin', 's_min');
+bindHsvSlider('s_smax', 'v_smax', 's_max');
+bindHsvSlider('s_vmin', 'v_vmin', 'v_min');
+bindHsvSlider('s_vmax', 'v_vmax', 'v_max');
+
+function sendAllHSV() {
+  var params = [
+    {id:'s_hmin', name:'h_min'}, {id:'s_hmax', name:'h_max'},
+    {id:'s_smin', name:'s_min'}, {id:'s_smax', name:'s_max'},
+    {id:'s_vmin', name:'v_min'}, {id:'s_vmax', name:'v_max'}
+  ];
+  params.forEach(function(p) {
+    var v = parseInt(document.getElementById(p.id).value);
+    sendLaneReconfigure(p.name, v);
+  });
+  setHsvStatus('📤 Semua 6 param HSV dihantar...');
+}
+
+updateHsvPreview();
+
+// ==================== AUTO HSV API ====================
+let currentHsvProposal = null;
+
+function startCalibration() {
+  const btn = document.getElementById('btn_start_calib');
+  btn.innerText = "Calibrating (mengambil masa 5-10 saat)...";
+  btn.disabled = true;
+  document.getElementById('calib_results').style.display = 'none';
+  document.getElementById('calib_actions').style.display = 'none';
+  
+  fetch('/api/calibrate', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      btn.innerText = "Start Calibrate";
+      btn.disabled = false;
+      if (data.error) {
+        alert("Ralat kalibrasi: " + data.error + "\n\nDetails:\n" + (data.details || "None"));
+        return;
+      }
+      currentHsvProposal = data;
+      
+      document.getElementById('res_method').innerText = data.method;
+      document.getElementById('res_conf').innerText = data.confidence.toFixed(2);
+      document.getElementById('res_cov').innerText = data.coverage_pct.toFixed(1) + "%";
+      document.getElementById('res_status').innerText = (data.valid ? 'VALID ✓' : 'NEEDS REFINE ⚠') + " (" + data.notes + ")";
+      document.getElementById('res_lower').innerText = JSON.stringify(data.lower_hsv);
+      document.getElementById('res_upper').innerText = JSON.stringify(data.upper_hsv);
+      
+      // Refresh the static images by appending a timestamp to bypass browser cache
+      document.getElementById('autoHsvLaneStream').src = '/calib_original.jpg?t=' + new Date().getTime();
+      document.getElementById('autoHsvMaskStream').src = '/calib_mask.jpg?t=' + new Date().getTime();
+
+      document.getElementById('calib_results').style.display = 'block';
+      document.getElementById('calib_actions').style.display = 'grid';
+      document.getElementById('btn_start_calib').style.display = 'none';
+    })
+    .catch(err => {
+      btn.innerText = "Start Calibrate";
+      btn.disabled = false;
+      alert("Gagal memanggil API: " + err);
+    });
+}
+
+function saveCalibration() {
+  if (!currentHsvProposal) return;
+  const btn = document.getElementById('btn_save_calib');
+  btn.innerText = "System sedang di-restart (Sila tunggu ~15 saat)...";
+  btn.disabled = true;
+  
+  fetch('/api/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      lower: currentHsvProposal.lower_hsv,
+      upper: currentHsvProposal.upper_hsv
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    btn.innerText = "Save Calibration";
+    btn.disabled = false;
+    if (data.status === 'ok') {
+      alert("System ready! Butang start boleh digunakan seperti biasa.");
+      quitCalibration();
+    } else {
+      alert("Gagal simpan: " + data.error);
+    }
+  })
+  .catch(err => {
+    btn.innerText = "Save Calibration";
+    btn.disabled = false;
+    alert("Ralat jaringan: " + err);
+  });
+}
+
+function quitCalibration() {
+  currentHsvProposal = null;
+  document.getElementById('calib_results').style.display = 'none';
+  document.getElementById('calib_actions').style.display = 'none';
+  document.getElementById('btn_start_calib').style.display = 'block';
+}
+
+// ==================== MULA SAMBUNGAN ====================
+connectRos();
+</script>
+
+</body>
+</html>

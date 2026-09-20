@@ -1,0 +1,16 @@
+<launch>
+  <!-- rosserial untuk Arduino Mega -->
+  <node name="carbot_serial"
+        pkg="rosserial_python"
+        type="serial_node.py"
+        output="screen">
+    <param name="port" value="/dev/ttyMEGA"/>
+    <param name="baud" value="115200"/>
+  </node>
+<!-- LiDAR Filter - 90 darjah hadapan sahaja -->
+  <node name="lidar_filter"
+	pkg="carbot"
+	type="lidar_filter.py"
+	output="screen"/>
+
+</launch>

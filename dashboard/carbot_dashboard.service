@@ -1,0 +1,18 @@
+[Unit]
+Description=CarBot Tuning Dashboard (HTTP :8080)
+After=network.target carbot.service local-fs.target
+Wants=carbot.service
+RequiresMountsFor=/ssd
+
+[Service]
+Type=simple
+User=jetson
+WorkingDirectory=/ssd/dashboard
+ExecStart=/usr/bin/python3 /ssd/dashboard/serve.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
